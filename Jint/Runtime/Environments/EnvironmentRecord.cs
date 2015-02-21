@@ -1,4 +1,5 @@
-﻿using Jint.Native;
+﻿using System.Collections.Generic;
+using Jint.Native;
 using Jint.Native.Object;
 
 namespace Jint.Runtime.Environments
@@ -11,6 +12,11 @@ namespace Jint.Runtime.Environments
     {
         protected EnvironmentRecord(Engine engine) : base(engine)
         {
+        }
+
+        public virtual IDictionary<string, Binding> Bindings
+        {
+          get { return null; }
         }
 
         /// <summary>

@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using Jint.JintDebugger;
 using Jint.Native;
 using Jint.Native.Argument;
 using Jint.Native.Array;
@@ -22,13 +23,18 @@ using Jint.Runtime.Descriptors;
 using Jint.Runtime.Environments;
 using Jint.Runtime.Interop;
 using Jint.Runtime.References;
+using Jint.Runtime.CallStack;
 
 namespace Jint
 {
-    using Jint.Runtime.CallStack;
+
 
     public class Engine
     {
+//FVE debugger
+        public StepMode _stepMode;
+        public decimal _callBackStepOverDepth;
+
         private readonly ExpressionInterpreter _expressions;
         private readonly StatementInterpreter _statements;
         private readonly Stack<ExecutionContext> _executionContexts;
@@ -138,6 +144,7 @@ namespace Jint
             }
 
             ClrTypeConverter = new DefaultTypeConverter(this);
+            BreakPoints = new List<BreakPoint>();
         }
 
         public LexicalEnvironment GlobalEnvironment;
@@ -165,7 +172,88 @@ namespace Jint
 
         public ExecutionContext ExecutionContext { get { return _executionContexts.Peek(); } }
 
-        internal Options Options { get; private set; }
+        public Options Options { get; private set; }
+
+        #region Debugger
+        public class StopEngineException : Exception { }
+        public class BreakEngineException : Exception { }
+        public delegate StepMode DebugStepDelegate(object sender, DebugInformation e);
+        public event DebugStepDelegate Step;
+        public event EventHandler<DebugInformation> Break;
+        public delegate bool TestBreakExecutionDelegate(bool ignoreBreak);
+        public event TestBreakExecutionDelegate TestBreakExecution;
+        public List<BreakPoint> BreakPoints { get; private set; }
+        public Stack<string> DebugCallStack { get; set; }
+        public bool DebugMode { get; set; }
+        public bool IgnoreBreak { get; set; }
+        public StepMode OnStep(object sender, DebugInformation info)
+        {
+          if (DebugMode == false)
+          {
+            return StepMode.None;
+          }
+          if (Step != null && info.CurrentStatement != null && info.CurrentStatement.Location.Source != null && _stepMode != StepMode.Over)
+          {
+            _stepMode = Step(this, info);
+          }
+
+          if (Break != null)
+          {
+            BreakPoint breakpoint = null;
+            foreach (BreakPoint breakPoint in BreakPoints)
+            {
+              if (BpTest(info, breakPoint) == true)
+              {
+                breakpoint = breakPoint;
+              }
+            }
+
+            if (breakpoint != null)
+            {
+              Break(this, info);
+            }
+          }
+          return _stepMode;
+        }
+        private bool BpTest(DebugInformation info, BreakPoint l)
+        {
+          bool afterStart, beforeEnd;
+
+          afterStart = l.Line > info.CurrentStatement.Location.Start.Line
+              || (l.Line == info.CurrentStatement.Location.Start.Line && l.Char >= info.CurrentStatement.Location.Start.Column);
+
+          if (!afterStart)
+          {
+            return false;
+          }
+
+          beforeEnd = l.Line < info.CurrentStatement.Location.End.Line
+              || (l.Line == info.CurrentStatement.Location.End.Line && l.Char <= info.CurrentStatement.Location.End.Column);
+
+          if (!beforeEnd)
+          {
+            return false;
+          }
+
+          if (!string.IsNullOrEmpty(l.Condition))
+          {
+            return Convert.ToBoolean(this.Execute(l.Condition));
+          }
+
+          return true;
+        }
+        public DebugInformation CreateDebugInformation(Statement statement)
+        {
+          var info = new DebugInformation {CurrentStatement = statement, CallStack = DebugCallStack};
+
+          if (ExecutionContext != null)
+            if (ExecutionContext.VariableEnvironment != null) 
+              info.Locals = ExecutionContext.VariableEnvironment.Record;
+
+          return info;
+        }
+
+        #endregion
 
         public ExecutionContext EnterExecutionContext(LexicalEnvironment lexicalEnvironment, LexicalEnvironment variableEnvironment, JsValue thisBinding)
         {
@@ -239,20 +327,30 @@ namespace Jint
             CallStack.Clear();
         }
 
+        public Engine Execute(string source, ParserOptions options)
+        {
+          var parser = new JavaScriptParser();
+          CurrentStatement = null;
+          return Execute(parser.Parse(source, options));
+        }
+
+        public static Program Compile(string source, ParserOptions options)
+        {
+          var parser = new JavaScriptParser();
+          return parser.Parse(source, options);
+        }
+
         public Engine Execute(string source)
         {
             var parser = new JavaScriptParser();
+            CurrentStatement = null;
             return Execute(parser.Parse(source));
-        }
-
-        public Engine Execute(string source, ParserOptions parserOptions)
-        {
-            var parser = new JavaScriptParser();
-            return Execute(parser.Parse(source, parserOptions));
         }
 
         public Engine Execute(Program program)
         {
+            CurrentStatement = null;
+            DebugCallStack = new Stack<string>();
             ResetStatementsCount();
             ResetTimeoutTicks();
             ResetLastStatement();
@@ -301,6 +399,22 @@ namespace Jint
             }
 
             _lastSyntaxNode = statement;
+
+            CurrentStatement = statement;
+
+            if (DebugMode)
+            {
+              var old = _stepMode;
+              _stepMode = OnStep(this, CreateDebugInformation(statement));
+              if (old == StepMode.Into && _stepMode == StepMode.Over)
+              {
+                _callBackStepOverDepth = DebugCallStack.Count;
+              }
+            }
+            if (TestBreakExecution != null && TestBreakExecution(IgnoreBreak))
+            {
+              throw new BreakEngineException();
+            }
 
             switch (statement.Type)
             {
@@ -369,10 +483,12 @@ namespace Jint
             }
         }
 
-        public object EvaluateExpression(Expression expression)
-        {
-            _lastSyntaxNode = expression;
+      public Statement CurrentStatement { get; private set; }
 
+
+      public object EvaluateExpression(Expression expression)
+        {
+			_lastSyntaxNode = expression;
             switch (expression.Type)
             {
                 case SyntaxNodes.AssignmentExpression:

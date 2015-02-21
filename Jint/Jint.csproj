@@ -47,6 +47,9 @@
     <Compile Include="DeclarationBindingType.cs" />
     <Compile Include="EvalCodeScope.cs" />
     <Compile Include="Engine.cs" />
+    <Compile Include="JintDebugger\BreakPoint.cs" />
+    <Compile Include="JintDebugger\DebugInformation.cs" />
+    <Compile Include="JintDebugger\SourceCodeDescriptor.cs" />
     <Compile Include="Native\Array\ArrayConstructor.cs" />
     <Compile Include="Native\Array\ArrayInstance.cs" />
     <Compile Include="Native\Array\ArrayPrototype.cs" />
@@ -200,6 +203,7 @@
     <None Include="Jint.nuspec" />
     <None Include="Jint.snk" />
   </ItemGroup>
+  <ItemGroup />
   <Import Project="$(MSBuildExtensionsPath32)\Microsoft\Portable\$(TargetFrameworkVersion)\Microsoft.Portable.CSharp.targets" />
   <PropertyGroup>
     <PostBuildEvent>

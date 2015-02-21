@@ -1,8 +1,10 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Reflection;
 using System.Threading;
+using Jint.JintDebugger;
 using Jint.Native.Number;
 using Jint.Parser;
 using Jint.Parser.Ast;
@@ -16,8 +18,10 @@ namespace Jint.Tests.Runtime
     public class EngineTests : IDisposable
     {
         private readonly Engine _engine;
+        private string _debugResult;
+        private int _breakLine;
 
-        public EngineTests()
+      public EngineTests()
         {
             _engine = new Engine()
                 .SetValue("log", new Action<object>(Console.WriteLine))
@@ -32,7 +36,49 @@ namespace Jint.Tests.Runtime
 
         private void RunTest(string source)
         {
-            _engine.Execute(source);
+          _engine.Execute(source);
+        }
+
+        private void RunDebugTest(string source, StepMode sm, int bpLine)
+        {
+          if (bpLine != -1)
+          {
+            _breakLine = -1;
+            _engine.Break += _engine_Break;
+            var breakpoints = new List<int> {bpLine+1};
+            _engine.BreakPoints.Clear();
+            foreach (int bp in breakpoints)
+            {
+              _engine.BreakPoints.Add(new BreakPoint(bp, 1));
+            }
+          }
+          var options = new ParserOptions {Source = source};
+          _debugResult = "";
+          _engine.DebugMode = true;
+          _engine._stepMode = sm;
+          _engine.Step += _engine_Step;
+          _engine.Execute(source, options);
+          _engine.Step -= _engine_Step;
+        }
+
+        void _engine_Break(object sender, DebugInformation e)
+        {
+          _breakLine = e.CurrentStatement.Location.Start.Line;
+          var engine = sender as Engine;
+          var stmt = e.CurrentStatement.Location.Source.Replace("\n", " ");
+          stmt = stmt.Replace("\r", " ");
+          stmt = stmt.Substring(e.CurrentStatement.Range[0], e.CurrentStatement.Range[1] - e.CurrentStatement.Range[0]);
+          _debugResult += stmt;
+        }
+
+        JintDebugger.StepMode _engine_Step(object sender, JintDebugger.DebugInformation e)
+        {
+          var engine = sender as Engine;
+          var stmt = e.CurrentStatement.Location.Source.Replace("\n", " ");
+          stmt = stmt.Replace("\r", " ");
+          stmt = stmt.Substring(e.CurrentStatement.Range[0], e.CurrentStatement.Range[1] - e.CurrentStatement.Range[0]);
+          _debugResult += stmt;
+          return engine._stepMode;
         }
 
         [Theory]
@@ -1152,6 +1198,47 @@ namespace Jint.Tests.Runtime
                 assert(a.length === 1);
                 assert(a[0] === 3);
             ");
+        }
+        [Fact]
+        public void ShouldDebugStepInto()
+        {
+          RunDebugTest(@"
+              function fn1()
+              {
+                var a = 123;
+              }
+
+              fn1();
+            ", StepMode.Into,-1);
+          Assert.Equal(@"function fn1()               {                 var a = 123;               }fn1();{                 var a = 123;               }var a = 123;", _debugResult);
+        }
+        [Fact]
+        public void ShouldDebugStepOver()
+        {
+          RunDebugTest(@"
+              function fn1()
+              {
+                var a = 123;
+              }
+
+              fn1();
+            ", StepMode.Over,-1);
+          Assert.Equal(@"", _debugResult);
+        }
+        [Fact]
+        public void ShouldDebugBreakPoint()
+        {
+          RunDebugTest(@"
+              function fn1()
+              {
+                var a;
+                a = 123; 
+              }
+
+              fn1();
+            ", StepMode.Over,2);
+          Assert.Equal(2, _breakLine);
+          Assert.Equal(@"function fn1()               {                 var a;                 a = 123;                }", _debugResult);
         }
     }
 }
