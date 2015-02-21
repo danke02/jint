@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Linq;
+using Jint.JintDebugger;
 using Jint.Native;
 using Jint.Native.Function;
 using Jint.Native.Number;
@@ -789,6 +790,36 @@ namespace Jint.Runtime
         {
             var callee = EvaluateExpression(callExpression.Callee);
 
+//FVE debugger
+            #region DebugMode
+            if (_engine.DebugMode)
+            {
+              var identifier = callExpression.Callee as Identifier;
+              if (identifier != null)
+              {
+                var stack = identifier.Name + "(";
+                var paramStrings = new string[callExpression.Arguments.ToArray().Length];
+
+                for (int i = 0; i < callExpression.Arguments.ToArray().Length; i++)
+                {
+                  if (callExpression.Arguments.ElementAt(i) != null)
+                  {
+                    var identifier1 = callExpression.Arguments.ElementAt(i) as Identifier;
+                    if (identifier1 != null)
+                      paramStrings[i] = identifier1.Name;
+                  }
+                  else
+                    paramStrings[i] = "null";
+                }
+
+                stack += string.Join(", ", paramStrings);
+                stack += ")";
+                _engine.DebugCallStack.Push(stack);
+              }
+            }
+
+            #endregion
+
             JsValue thisObject;
 
             // todo: implement as in http://www.ecma-international.org/ecma-262/5.1/#sec-11.2.4
@@ -850,15 +881,31 @@ namespace Jint.Runtime
             {
                 return ((EvalFunctionInstance) callable).Call(thisObject, arguments, true);
             }
-            
-            var result = callable.Call(thisObject, arguments);
+
+            var retVal = callable.Call(thisObject, arguments);
+
+//FVE debugger
+            #region DebugMode
+            if (_engine.DebugMode)
+            {
+              if (_engine.DebugCallStack.Count > 0)
+              {
+                _engine.DebugCallStack.Pop();
+              }
+              if (_engine._stepMode == StepMode.Over && _engine.DebugCallStack.Count <= _engine._callBackStepOverDepth)
+              {
+                _engine._callBackStepOverDepth = _engine.DebugCallStack.Count;
+                _engine._stepMode = StepMode.Into;
+              }
+            }
+            #endregion
 
             if (isRecursionHandled)
             {
                 _engine.CallStack.Pop();
             }
 
-            return result;
+            return retVal;
         }
 
         public JsValue EvaluateSequenceExpression(SequenceExpression sequenceExpression)
