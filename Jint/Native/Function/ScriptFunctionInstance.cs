@@ -89,9 +89,7 @@ namespace Jint.Native.Function
                         _functionDeclaration.VariableDeclarations, 
                         this,
                         arguments);
-                    Engine.IgnoreBreak = true;
                     var result = Engine.ExecuteStatement(_functionDeclaration.Body);
-                    Engine.IgnoreBreak = false;
 
                     if (result.Type == Completion.Throw)
                     {
