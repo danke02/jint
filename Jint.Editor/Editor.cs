@@ -21,6 +21,7 @@ namespace Jint.Editor
 {
   public partial class Editor : UserControl
   {
+    private readonly Dictionary<int, int> _uniqueIdToLineNumber = new Dictionary<int,int>();
     private readonly List<int> _breakpoints = new List<int>();
     private readonly HashSet<int> _breakpointsLineId = new HashSet<int>();
     private readonly Style _commentStyle = new TextStyle(Brushes.Green, null, FontStyle.Regular);
@@ -47,7 +48,8 @@ namespace Jint.Editor
       txtScript.TextChanged += TxtScriptTextChanged;
       txtScript.PaintLine += TxtScriptPaintLine;
       txtScript.LineRemoved += TxtScriptLineRemoved;
-
+      txtScript.LineInserted += TxtScriptLineInserted;
+      
       txtScript.AddStyle(_keywordsStyle);
       txtScript.AddStyle(_functionsStyle);
       txtScript.AddStyle(_commentStyle);
@@ -57,6 +59,8 @@ namespace Jint.Editor
       txtScript.DefaultStyle.ForeBrush = Brushes.Black;
 
       SetUpEngine();
+      
+      _uniqueIdToLineNumber.Add(0, 0);
     }
 
     private void SetUpEngine()
@@ -146,15 +150,56 @@ namespace Jint.Editor
 
     private void TxtScriptLineRemoved(object sender, LineRemovedEventArgs e)
     {
+      int minLineIndex = int.MaxValue;
       //remove lines from breakpoints
       foreach (int id in e.RemovedLineUniqueIds)
+      {
         if (_breakpointsLineId.Contains(id))
         {
-          _breakpointsLineId.Remove(id);
-          _breakpoints.Remove(id);
+            _breakpointsLineId.Remove(id);
+            _breakpoints.Remove(id);
         }
+        //remove uniqueID from _uniqueIdToLineNumber dictionary
+        if(_uniqueIdToLineNumber.ContainsKey(id))
+        {
+            int lineIndex = _uniqueIdToLineNumber[id];
+            if (lineIndex < minLineIndex)
+                minLineIndex = lineIndex;
+            _uniqueIdToLineNumber.Remove(id);
+        }
+      }
+      //line Index of lines below removed lines had been changed. recreate _uniqueIdToLineNumber dictionary from smallest line index of removed lines.
+      for (int i = minLineIndex; i < txtScript.LinesCount; ++i)
+      {
+        Line tmpLine = txtScript[i];
+        int key = tmpLine.UniqueId, val;
+        if (_uniqueIdToLineNumber.TryGetValue(key, out val))
+        {
+            _uniqueIdToLineNumber[key] = i;
+        }
+        else
+        {
+            _uniqueIdToLineNumber.Add(key, i);
+        }
+      }
     }
-
+    private void TxtScriptLineInserted(object sender, LineInsertedEventArgs e)
+    {
+      //recreate _uniqueIdToLineNumber dictionary from current inserted line
+      for (int i = e.Index; i < txtScript.LinesCount; ++i)
+      {
+        Line tmpLine = txtScript[i];
+        int key = tmpLine.UniqueId, val;
+        if (_uniqueIdToLineNumber.TryGetValue(key, out val))
+        {
+          _uniqueIdToLineNumber[key] = i;
+        }
+        else
+        {
+          _uniqueIdToLineNumber.Add(key, i);
+        }
+      }
+    }
     private void TxtScriptPaintLine(object sender, PaintLineEventArgs e)
     {
       if (_breakpointsLineId.Contains(txtScript[e.LineIndex].UniqueId))
@@ -338,7 +383,8 @@ namespace Jint.Editor
       _engine.BreakPoints.Clear();
       for (int i = 0; i < _breakpoints.Count; i++)
       {
-        Line line = txtScript[_breakpoints[i]];
+        int lineIndex = _uniqueIdToLineNumber[_breakpoints[i]];
+        Line line = txtScript[lineIndex];
 
         _engine.BreakPoints.Add(new BreakPoint(_breakpoints[i] + 1, line.Count/2));
       }
